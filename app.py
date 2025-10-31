@@ -24,7 +24,6 @@ def get_available_pages():
     custom_names = {
         'page1': 'Euler Liquidation Factor',
         'page2': 'Loan Liquidation Risk',
-        'page3': 'Page 3',
         'page4': 'Interest Rate Model Analyzer'
     }
     
