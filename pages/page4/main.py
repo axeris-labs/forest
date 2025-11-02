@@ -4,10 +4,73 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import pandas as pd
+from decimal import Decimal, getcontext
+
+# Set high precision for decimal calculations
+getcontext().prec = 50
+
+# Kamino Constants
+SLOTS_PER_SECOND = 2
+SLOTS_PER_YEAR = SLOTS_PER_SECOND * 60 * 60 * 24 * 365.25
 
 def calculate_supply_rate(utilization, borrow_rate, reserve_factor):
     """Calculate supply rate using the formula: supply_rate = utilization * borrow_rate * (1 - reserve_factor)"""
     return (utilization / 100) * borrow_rate * (1 - reserve_factor / 100)
+
+def calculate_apy_from_apr(apr):
+    """Convert APR to APY using compound interest formula"""
+    base = Decimal('1') + (Decimal(str(apr)) / Decimal(str(SLOTS_PER_YEAR)))
+    apy = float(base) ** SLOTS_PER_YEAR - 1
+    return Decimal(str(apy))
+
+def calculate_apr_from_apy(apy):
+    """Convert APY to APR using reverse compound interest formula"""
+    base = Decimal(str(apy)) + Decimal('1')
+    exponent = 1 / SLOTS_PER_YEAR
+    result = (float(base) ** exponent - 1) * SLOTS_PER_YEAR
+    return Decimal(str(result))
+
+def calculate_kamino_supply_rate(borrow_rate, utilization, fixed_host_rate, protocol_take_rate, slot_duration_ms):
+    """
+    Calculate supply rate using Kamino protocol's method
+    
+    Args:
+        borrow_rate (float): Borrow rate as percentage
+        utilization (float): Utilization rate as percentage
+        fixed_host_rate (float): Fixed host interest rate as percentage
+        protocol_take_rate (float): Protocol take rate as percentage
+        slot_duration_ms (int): Recent slot duration in milliseconds
+    
+    Returns:
+        float: Supply rate as percentage
+    """
+    # Calculate slot adjustment factor
+    slot_adjustment_factor = 1000 / (SLOTS_PER_SECOND * slot_duration_ms)
+    
+    # Convert borrow rate percentage to decimal APY
+    borrow_apy_decimal = Decimal(str(borrow_rate)) / Decimal('100')
+    
+    # Convert borrow APY to APR
+    borrow_apr = calculate_apr_from_apy(borrow_apy_decimal)
+    
+    # Calculate borrow rate by subtracting fixed host interest rate
+    fixed_host_decimal = Decimal(str(fixed_host_rate)) / Decimal('100')
+    adjusted_borrow_rate = borrow_apr - (fixed_host_decimal * Decimal(str(slot_adjustment_factor)))
+    
+    # Convert utilization and protocol take rate to decimals
+    utilization_decimal = Decimal(str(utilization)) / Decimal('100')
+    protocol_take_decimal = Decimal(str(protocol_take_rate)) / Decimal('100')
+    
+    # Calculate supply APR
+    supply_apr = utilization_decimal * adjusted_borrow_rate * (Decimal('1') - protocol_take_decimal)
+    
+    # Convert supply APR to supply APY
+    supply_apy = calculate_apy_from_apr(supply_apr)
+    
+    # Convert back to percentage
+    supply_apy_percent = supply_apy * Decimal('100')
+    
+    return float(supply_apy_percent)
 
 def calculate_derivatives(utilization, rates):
     """Calculate the derivative (slope) of the rate curve using numpy gradient."""
@@ -17,7 +80,7 @@ def interpolate_curve(utilization_points, rate_points, common_util):
     """Interpolate curve to common utilization points."""
     return np.interp(common_util, utilization_points, rate_points)
 
-def create_chart(curves_data, show_supply, show_derivatives, reserve_factor, util_range):
+def create_chart(curves_data, show_supply, show_derivatives, reserve_factor, util_range, use_kamino=False, fixed_host_rate=1.0, slot_duration_ms=500):
     """Create the main chart with borrow rates, optional supply rates, and optional derivatives."""
     
     # Create common utilization range
@@ -100,7 +163,17 @@ def create_chart(curves_data, show_supply, show_derivatives, reserve_factor, uti
         
         # Add supply rate curve if enabled
         if show_supply:
-            interpolated_supply = calculate_supply_rate(common_util, interpolated_borrow, reserve_factor)
+            if use_kamino:
+                # Calculate supply rates using Kamino method for each utilization point
+                interpolated_supply = []
+                for util, borrow_rate in zip(common_util, interpolated_borrow):
+                    kamino_supply_rate = calculate_kamino_supply_rate(
+                        borrow_rate, util, fixed_host_rate, reserve_factor, slot_duration_ms
+                    )
+                    interpolated_supply.append(kamino_supply_rate)
+                interpolated_supply = np.array(interpolated_supply)
+            else:
+                interpolated_supply = calculate_supply_rate(common_util, interpolated_borrow, reserve_factor)
             
             if show_derivatives:
                 fig.add_trace(
@@ -238,6 +311,9 @@ def render():
         show_derivatives = st.toggle("Show Derivative Chart", value=False)
         show_supply = st.toggle("Show Supply Rate Curves", value=False)
         
+        # Kamino supply rate calculation toggle
+        use_kamino = st.toggle("Kamino Supply Rate Calculation", value=False, help="Use Kamino protocol's supply rate calculation method")
+        
         # Reserve factor (only show if supply curves are enabled)
         if show_supply:
             reserve_factor = st.number_input(
@@ -246,10 +322,33 @@ def render():
                 max_value=50.0,
                 value=10.0,
                 step=0.5,
-                help="Percentage of interest that goes to reserves"
+                help="Percentage of interest that goes to reserves (also used as PROTOCOL_TAKE_RATE for Kamino)"
             )
         else:
             reserve_factor = 10.0
+        
+        # Kamino-specific parameters (only show if Kamino toggle is enabled and supply curves are shown)
+        if use_kamino and show_supply:
+            st.subheader("Kamino Parameters")
+            fixed_host_rate = st.number_input(
+                "Fixed Host Interest Rate (%)",
+                min_value=0.0,
+                max_value=10.0,
+                value=1.0,
+                step=0.1,
+                help="Fixed host interest rate for Kamino calculation"
+            )
+            slot_duration_ms = st.number_input(
+                "Recent Slot Duration (ms)",
+                min_value=100,
+                max_value=2000,
+                value=500,
+                step=50,
+                help="Recent slot duration in milliseconds"
+            )
+        else:
+            fixed_host_rate = 1.0
+            slot_duration_ms = 500
         
         st.divider()
         
@@ -349,7 +448,7 @@ def render():
         
         if active_curves:
             # Create and display chart
-            fig = create_chart(active_curves, show_supply, show_derivatives, reserve_factor, util_range)
+            fig = create_chart(active_curves, show_supply, show_derivatives, reserve_factor, util_range, use_kamino, fixed_host_rate, slot_duration_ms)
             st.plotly_chart(fig, use_container_width=True)
             
             # Add spacing between chart and summary
