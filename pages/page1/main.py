@@ -78,43 +78,55 @@ def analyze_bad_debt(hf, raw_bonus, profit, bad_debt, ltv, LLTV):
     
     return bad_debt_info
 
-def create_plotly_chart(curves_data):
+def create_plotly_chart(curves_data, use_ltv=False):
     """Create a clean Plotly chart with both profit and bad debt curves on the same chart."""
     fig = go.Figure()
-    
+
+    # Styling constants (matching page3)
+    chart_bg = "#f0f0f0"
+    grid_color = "#d9d9d9"
+
     # Define colors for different curves
     curve_colors = px.colors.qualitative.Set1
-    
+
     for i, (name, data) in enumerate(curves_data.items()):
         base_color = curve_colors[i % len(curve_colors)]
-        
+
+        # Select x-axis data based on mode
+        x_data = data['ltv'] * 100 if use_ltv else data['hf']
+
         # Add profit trace (solid line, green tones)
         fig.add_trace(
             go.Scatter(
-                x=data['hf'],
+                x=x_data,
                 y=data['profit'],
                 mode='lines',
                 name=f'{name} - Profit',
-                line=dict(color='green' if name == 'Current' else base_color, width=2),
+                line=dict(color='green' if name == 'Current' else base_color, width=3),
                 showlegend=True
             )
         )
-        
+
         # Add bad debt trace (dashed line, red tones)
         fig.add_trace(
             go.Scatter(
-                x=data['hf'],
+                x=x_data,
                 y=data['bad_debt'],
                 mode='lines',
                 name=f'{name} - Bad Debt',
-                line=dict(color='red' if name == 'Current' else base_color, width=2, dash='dash'),
+                line=dict(color='red' if name == 'Current' else base_color, width=3, dash='dash'),
                 showlegend=True
             )
         )
-    
+
+    # Set axis title based on mode
+    x_axis_title = "LTV (%)" if use_ltv else "Health Factor"
+    chart_title = "Profit and Bad Debt vs LTV" if use_ltv else "Profit and Bad Debt vs Health Factor"
+
     # Update layout
     fig.update_layout(
-        title="Profit and Bad Debt vs Health Factor",
+        title={"text": f"<span style=\"font-weight:normal\">{chart_title}</span>", "x": 0.48, "xanchor": "center"},
+        title_font=dict(size=22),
         height=500,
         showlegend=True,
         legend=dict(
@@ -124,35 +136,38 @@ def create_plotly_chart(curves_data):
             xanchor="left",
             x=1.02
         ),
-        margin=dict(l=50, r=120, t=60, b=50),
-        xaxis_title="Health Factor",
-        yaxis_title="Amount ($)",
-        # Enhanced grid lines while maintaining minimal style
-        plot_bgcolor='white',
-        xaxis=dict(
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='rgba(128, 128, 128, 0.3)',  # Light gray with 30% opacity
-            zeroline=True,
-            zerolinewidth=1,
-            zerolinecolor='rgba(128, 128, 128, 0.4)'
-        ),
-        yaxis=dict(
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='rgba(128, 128, 128, 0.3)',  # Light gray with 30% opacity
-            zeroline=True,
-            zerolinewidth=1,
-            zerolinecolor='rgba(128, 128, 128, 0.4)'
-        )
+        margin=dict(l=80, r=120, t=60, b=50),
+        plot_bgcolor=chart_bg,
+        paper_bgcolor=chart_bg,
     )
-    
-    # Update x-axis (inverted)
-    fig.update_xaxes(autorange="reversed")
-    
+
+    fig.update_xaxes(
+        title_text=x_axis_title,
+        showgrid=True,
+        gridcolor=grid_color,
+        gridwidth=1,
+        showline=True,
+        linecolor=grid_color,
+        linewidth=1
+    )
+
+    fig.update_yaxes(
+        title_text="Amount ($)",
+        showgrid=True,
+        gridcolor=grid_color,
+        gridwidth=1,
+        showline=True,
+        linecolor=grid_color,
+        linewidth=1
+    )
+
+    # X-axis direction: HF is inverted (high=safe on left), LTV is normal (low=safe on left)
+    if not use_ltv:
+        fig.update_xaxes(autorange="reversed")
+
     # Add horizontal line at y=0 for reference
     fig.add_hline(y=0, line_dash="dot", line_color="gray", opacity=0.6)
-    
+
     return fig
 
 def render():
@@ -160,39 +175,42 @@ def render():
     st.title("Euler Liquidation Factor")
     st.markdown("Buffer-capped liquidation-bonus model with bad debt analysis")
     
-    # Initialize session state for curves
-    if 'curves' not in st.session_state:
-        st.session_state.curves = {}
+    # Initialize session state for curves (unique key for this page)
+    if 'euler_curves' not in st.session_state:
+        st.session_state.euler_curves = {}
     
     # Sidebar controls
     st.sidebar.markdown("### Model Parameters")
-    
+
     # Create 2-column layout for parameters
     with st.sidebar:
         col1, col2 = st.columns(2)
-        
+
         with col1:
             hf_start = st.number_input("HF Start", value=1.0, min_value=0.1, max_value=2.0, step=0.01, key="hf_start")
             steps = st.number_input("Steps", value=100, min_value=10, max_value=1000, step=10, key="steps")
             max_bonus = st.number_input("Max Bonus", value=0.15, min_value=0.01, max_value=0.5, step=0.01, key="max_bonus")
-        
+
         with col2:
             hf_end = st.number_input("HF End", value=0.80, min_value=0.1, max_value=1.5, step=0.01, key="hf_end")
             LLTV = st.number_input("LLTV", value=0.91, min_value=0.1, max_value=0.99, step=0.01, key="lltv")
             collateral_value = st.number_input("Collateral ($)", value=100.0, min_value=1.0, max_value=10000.0, step=1.0, key="collateral")
+
+        st.markdown("### Display Options")
+        use_ltv = st.toggle("Show X-axis as LTV (%)", value=False, help="Toggle between Health Factor and LTV (%) on x-axis. HF = LLTV / LTV")
     
     # Curve management
     st.sidebar.markdown("### Curve Management")
-    curve_name = st.sidebar.text_input("Curve Name", value=f"Curve {len(st.session_state.curves) + 1}")
+    curve_name = st.sidebar.text_input("Curve Name", value=f"Curve {len(st.session_state.euler_curves) + 1}")
     
     if st.sidebar.button("Add Curve"):
-        if curve_name and curve_name not in st.session_state.curves:
+        if curve_name and curve_name not in st.session_state.euler_curves:
             # Calculate model for this curve
             df, hf, raw_bonus, eff_bonus, profit, bad_debt, ltv, lltv_val = euler_liquidation_model(
                 hf_start, hf_end, steps, LLTV, max_bonus, collateral_value
             )
             
-            st.session_state.curves[curve_name] = {
+            st.session_state.euler_curves[curve_name] = {
                 'df': df,
                 'hf': hf,
                 'profit': profit,
@@ -214,13 +232,13 @@ def render():
             st.sidebar.error("Curve name already exists or is empty")
     
     # Display saved curves
-    if st.session_state.curves:
+    if st.session_state.euler_curves:
         st.sidebar.markdown("### Saved Curves")
-        for name in list(st.session_state.curves.keys()):
+        for name in list(st.session_state.euler_curves.keys()):
             col1, col2 = st.sidebar.columns([3, 1])
             col1.write(name)
             if col2.button("×", key=f"remove_{name}"):
-                del st.session_state.curves[name]
+                del st.session_state.euler_curves[name]
                 st.rerun()
     
     # Calculate current model
@@ -231,21 +249,23 @@ def render():
     # Create chart data including current parameters
     chart_data = {"Current": {
         'hf': hf,
+        'ltv': ltv,
         'profit': profit,
         'bad_debt': bad_debt
     }}
-    
+
     # Add saved curves to chart data
-    for name, curve in st.session_state.curves.items():
+    for name, curve in st.session_state.euler_curves.items():
         chart_data[name] = {
             'hf': curve['hf'],
+            'ltv': curve['ltv'],
             'profit': curve['profit'],
             'bad_debt': curve['bad_debt']
         }
-    
+
     # Display chart
     if chart_data:
-        fig = create_plotly_chart(chart_data)
+        fig = create_plotly_chart(chart_data, use_ltv=use_ltv)
         st.plotly_chart(fig, use_container_width=True)
     
     # Download option (minimal, centered)
