@@ -285,7 +285,7 @@ def render():
     
     # Initialize session state for curves
     if 'curves' not in st.session_state:
-        st.session_state.curves = [
+        st.session_state.irm_curves = [
             {'name': '', 'utilization': [], 'borrow_rates': []} for _ in range(5)
         ]
     
@@ -354,7 +354,7 @@ def render():
         
         # Clear all curves button
         if st.button("Clear All Curves", type="secondary"):
-            st.session_state.curves = [
+            st.session_state.irm_curves = [
                 {'name': '', 'utilization': [], 'borrow_rates': []} for _ in range(5)
             ]
             st.rerun()
@@ -369,30 +369,32 @@ def render():
         st.divider()  # Add space between curve management and controls
         
         # Curve input interface
+        curves = st.session_state.get('irm_curves', [{'name': '', 'utilization': [], 'borrow_rates': []} for _ in range(5)])
         for i in range(5):
-            with st.expander(f"Curve {i+1}" + (f" - {st.session_state.curves[i]['name']}" if st.session_state.curves[i]['name'] else ""), expanded=i==0):
+            curve_name_display = curves[i]['name'] if i < len(curves) and curves[i]['name'] else ''
+            with st.expander(f"Curve {i+1}" + (f" - {curve_name_display}" if curve_name_display else ""), expanded=i==0):
                 
                 # Curve name
                 curve_name = st.text_input(
                     f"Curve {i+1} Name",
-                    value=st.session_state.curves[i]['name'],
+                    value=st.session_state.irm_curves[i]['name'],
                     key=f"name_{i}",
                     placeholder=f"e.g., Model {i+1}"
                 )
-                st.session_state.curves[i]['name'] = curve_name
+                st.session_state.irm_curves[i]['name'] = curve_name
                 
                 # Number of points
                 num_points = st.number_input(
                     f"Number of Points",
                     min_value=2,
                     max_value=10,
-                    value=max(2, len(st.session_state.curves[i]['utilization'])),
+                    value=max(2, len(st.session_state.irm_curves[i]['utilization'])),
                     key=f"points_{i}"
                 )
                 
                 # Ensure we have the right number of points
-                current_util = st.session_state.curves[i]['utilization']
-                current_rates = st.session_state.curves[i]['borrow_rates']
+                current_util = st.session_state.irm_curves[i]['utilization']
+                current_rates = st.session_state.irm_curves[i]['borrow_rates']
                 
                 # Adjust arrays to match num_points
                 if len(current_util) < num_points:
@@ -402,8 +404,8 @@ def render():
                     current_util = current_util[:num_points]
                     current_rates = current_rates[:num_points]
                 
-                st.session_state.curves[i]['utilization'] = current_util
-                st.session_state.curves[i]['borrow_rates'] = current_rates
+                st.session_state.irm_curves[i]['utilization'] = current_util
+                st.session_state.irm_curves[i]['borrow_rates'] = current_rates
                 
                 # Input fields for each point
                 st.markdown("**Define Points:**")
@@ -415,26 +417,26 @@ def render():
                             f"Util {j+1} (%)",
                             min_value=0.0,
                             max_value=100.0,
-                            value=float(st.session_state.curves[i]['utilization'][j]),
+                            value=float(st.session_state.irm_curves[i]['utilization'][j]),
                             step=1.0,
                             key=f"util_{i}_{j}"
                         )
-                        st.session_state.curves[i]['utilization'][j] = util_val
+                        st.session_state.irm_curves[i]['utilization'][j] = util_val
                     
                     with col_rate:
                         rate_val = st.number_input(
                             f"Rate {j+1} (%)",
                             min_value=0.0,
                             max_value=1000.0,
-                            value=float(st.session_state.curves[i]['borrow_rates'][j]),
+                            value=float(st.session_state.irm_curves[i]['borrow_rates'][j]),
                             step=0.1,
                             key=f"rate_{i}_{j}"
                         )
-                        st.session_state.curves[i]['borrow_rates'][j] = rate_val
+                        st.session_state.irm_curves[i]['borrow_rates'][j] = rate_val
                 
                 # Clear this curve button
                 if st.button(f"Clear Curve {i+1}", key=f"clear_{i}"):
-                    st.session_state.curves[i] = {'name': '', 'utilization': [], 'borrow_rates': []}
+                    st.session_state.irm_curves[i] = {'name': '', 'utilization': [], 'borrow_rates': []}
                     st.rerun()
     
     with col2:
@@ -442,7 +444,7 @@ def render():
         
         # Filter out empty curves
         active_curves = [
-            curve for curve in st.session_state.curves 
+            curve for curve in st.session_state.irm_curves 
             if curve['name'] and curve['utilization'] and curve['borrow_rates']
         ]
         
